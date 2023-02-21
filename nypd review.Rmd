@@ -1,0 +1,163 @@
+---
+title: "NYPD - Shootings Data Review"
+author: "Micheal Wilson"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document, pdf_document: default
+---
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+
+library(lubridate)
+library(ggplot2)
+library(tidyverse) #loading the overarching package, but really need dplyr
+
+```
+
+## Data notes and variable definitions:
+
+This information is available from "NYPD Shooting Incident Data" landing page, <https://data.cityofnewyork.us/Public-Safety/NYPD-Shooting-Incident-Data-Year-To-Date-/5ucz-vwe8> Accessed 18 FEB 2022,
+
+Some key items of note are primarily located in the "Data Footnotes" document located on that page. With that in mind, while it's possible to interpolate or identify some patterns from the data on a micro-level (below Borough level); however, considering the information in the footnotes, no geo-spatial data processing attempts will occur here in this analysis below the "Borough level." Geocoding of the data cannot be precise in most circumstances.
+
+Another key item is that duplicated entries exist. Each "INCIDENT_KEY" represents a victim, and duplicate keys are one incident.
+
+With this guidance in mind, the next section performs data loading.
+
+# Data ETL (Extract, Transform, Load)
+
+## Loading
+
+```{r 2022_Data_ETL1}
+
+#loads 2022 data only
+raw_data <- read.csv("~/Grad School/DS as a Field/NYPD Analysis/NYPD_Shooting_Incident_Data__Year_To_Date_.csv", na.strings="(null)", stringsAsFactors=TRUE)
+```
+
+## Extraction
+
+Defining the interest subset in the data:
+
+```{r 2022_Data_ETL2}
+
+#colnames(df1)
+not.interested.in <- c("PRECINCT","JURISDICTION_CODE","X_COORD_CD","Y_COORD_CD","Latitude","Longitude","New.Georeferenced.Column")
+
+
+subset.1.raw <- select(raw_data ,!any_of(not.interested.in)) 
+#Remember, vector's job is to identify the columns only, not do the discarding itself, and hence the somewhat grammatical double negative here. 
+rm(not.interested.in)
+```
+
+The common theme in all of the variables being discarded here is that they are largely a spatial component of the data. Precinct can refer to a specific station or a geographic area, and so it is discarded here. "JURISDICTION_CODE" is dropped since it also refers to what is arguably a geospatial component of the data that is below the "Borough level." Namely, since it refers to where the perpetrator was at the time of the crime, it is also discarded.
+
+Since it is given that shootings can have more than one victim, it may be of importance to assign a value to each unique key indicating the number of duplicates it may have. This will provide a "weight" or "magnitude" to each particular data point, and may be more meaningful in analysis in the future. After all, it'd be wise to have the choice to take into account only unique incidents, rather than incurring additional unintentional bias in models due to duplicates.
+
+```{r data_dup_idandtransform}
+# set up a temp object to append the counts to
+temp <- subset.1.raw %>% 
+  group_by(subset.1.raw$INCIDENT_KEY) %>%
+  add_count(name = "freq")
+
+#isolate only the frequencies
+temp <- temp[,"freq"]
+
+#merge it back to the working dataset
+subset.1.raw <- cbind(subset.1.raw,temp)
+#remove temp object
+rm(temp)
+# define another temp object for unique keys. keeping the first occurrence. 
+temp <- subset.1.raw[!duplicated(subset.1.raw$INCIDENT_KEY),]
+subset.1.uniques <- temp
+rm(temp)
+#repeat for an additional frame for multiple-victims
+#Technically anything over 3 people is considered a mass shooting, which may warrant a further point later
+temp <- subset.1.raw[duplicated(subset.1.raw$INCIDENT_KEY),]
+subset.1.dupkeys <- temp
+rm(temp)
+
+```
+
+```{r data_transform_hourdata}
+tformat <- "%H:%M:%S" 
+dformat <- "%m/%d/%y"
+ttemp <- as.character(subset.1.raw$OCCUR_TIME)
+thms <- strptime(ttemp, tformat)
+ztime <- rep(as.POSIXct(strptime(as.character("00:00:00"),tformat)),length(subset.1.raw$OCCUR_TIME))
+
+hourval <- as.numeric(difftime(thms,ztime,units = "hours")/24)
+print(hourval)
+hist(hourval)
+
+```
+
+
+# Summary Statistics
+## Counts
+```{r statsum_counts}
+table(subset.1.raw[,4]) # By borough
+table(subset.1.raw[,5]) # inside/outside
+
+table(subset.1.raw[,6]) # Location class 
+table(subset.1.raw[,7]) # Location type
+
+table(subset.1.raw[,8]) # homicide triggered
+# Let's union location type vs. death
+table(subset.1.raw[,c(6,8)])
+table(subset.1.raw[,c(7,8)])
+
+table(subset.1.raw[,c(9)]) #Incidents by perp age group
+table(subset.1.raw[,c(10)]) #Incidents by perp Gender
+table(subset.1.raw[,c(11)]) #incidents by perp race
+
+table(subset.1.raw[,c(12)]) #victims by age group
+table(subset.1.raw[,c(13)]) #victim genders
+table(subset.1.raw[,c(14)]) #victim race
+
+# comparing groups of perps to victims to see if
+table(subset.1.raw[,c(12,9)])
+table(subset.1.raw[,c(13,10)])
+table(subset.1.raw[,c(14,11)])
+
+# seeing which group accounts for the most mass shootings
+table(subset.1.raw[,c(9,15)])
+table(subset.1.raw[,c(10,15)])
+table(subset.1.raw[,c(11,15)])
+
+# it should be unsurprising that the most victims would be in
+# high density locations
+table(subset.1.raw[,c(5,15)])
+table(subset.1.raw[,c(6,15)])
+table(subset.1.raw[,c(7,15)])
+```
+
+## BEGIN WHITESPACE
+
+## PLOT TEMPLATE CHUNK
+
+Embedding plots chunk template, Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r plot1, echo=FALSE}
+
+#par(mfrow = c(3,3))
+
+#draft.loop.vector <- 1:ncol(df1)
+
+
+#for (i in draft.loop.vector) {
+#  x <- df1[,i]
+  
+#  plot(df1[,i], main = paste(i, colnames(df1)[i]))
+#}
+
+#pairs(df1)
+```
