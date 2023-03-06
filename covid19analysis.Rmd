@@ -17,7 +17,7 @@ The states' initial response to the pandemic greatly affected their numbers on t
 
 ## Packages
 
-Most of this project will focus on using base R for compatibility for others who may use this work. 'Tidyverse' and 'lubridate' are loaded in case certain analytical tasks need to be performed using those packages. A more important package, 'usdata', is loaded to grab additional county-level information, and it's particularly important for extensions of this data exploration by having access to demographic data associated to the Johns Hopkins University data through the county FIPS keys.
+Most of this project will focus on using base R for compatibility for others who may use this work. 'Tidyverse' and 'lubridate' are loaded in case certain analytical tasks need to be performed using those packages. The package 'usdata' is loaded to grab additional county-level information, and it's particularly important for extensions of this data exploration by having access to demographic data associated to the Johns Hopkins University data through the county FIPS keys. Data from 'usdata' is provided for extensions or follow-on projects if needed. 
 
 ```{r packages, include=FALSE}
 #Clear global environment for analysis -- starting from clean slate
@@ -43,9 +43,11 @@ if(require("usdata")){
 library(usdata)
 ```
 
-# Data Extract, Load, Transform (ETL)
+# Data Extract, Load, Transform (ETL) and Description
 
 Data extraction and tidying is performed largely in base R for compatibility. Full code and markdown are available. Processes for tidying and transforming could be automated for this dataset for rapid report generation and model development, but those methods are not employed here. Static or fixed callouts, references, and definitions, are leveraged specifically for this narrow analysis of a considerable dataset.
+
+The primary data focused on is county-level data from the US. It is comprised of cumulative count data reported daily from various medical institutions at the county level by day. Data is transformed later in this report to look at daily counts. 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
@@ -303,7 +305,9 @@ print(summary(fc_lm1))
 
 # Model Review and Bias
 
-Given the model's predictive performance, the p-values of the model parameters, and the R-squared being considerably favorable, it would seem this is a fine model to describe the cumulative counts over time for these respective counties. For the intent of this assignment, that being to simply create a model of interest, the objective is met. Yet, if one were to naively accept this model as a factual epidemiological behavior of COVID-19, the very next logical leap could be to also assert "this is how COVID-19 pandemics spread." On the other hand, there is much more at play than a simple linear relationship between "here's a type of epidemic" and "here's the cases over time." This begins the review, and the discussion on the implicit biases for this model. 
+Given the model's predictive performance, the p-values of the model parameters, and the R-squared being considerably favorable, it would seem this is a fine model to describe the cumulative counts over time for these respective counties. For the intent of this assignment, that being to simply create a model of interest, the objective is met. 
+
+Yet, if one were to naively accept this model as a factual epidemiological behavior of COVID-19, the very next logical leap could be to also assert "this is how COVID-19 pandemics spread." On the other hand, there is much more at play than a simple linear relationship between "here's a type of epidemic" and "here's the cases over time." This begins the review, and the discussion on the implicit biases for this model. 
 
 The model only illuminates the general function used to map a time variable to it's co-domain as a cumulative sum of cases. This model does not explore relationships or factors that contributed to the spread over the last 3 years. Subscribing to these approaches on modeling by "just using the linear model", "just using the package", or now, "just let the AI handle it" presents a host of issues. This is tantamount, and arguably just as dangerous and potentially amoral, as businesses using simple linear regression to do financial forecasts and earnings projections to appease the shareholders if it makes the earnings report look better. This model does not demonstrate true causality, only correlation to time, at best. The bias here is implicit, but it's very plainly one that dismisses the complicated nature of epidemics.
 
@@ -311,5 +315,11 @@ The model only illuminates the general function used to map a time variable to i
 
 Given that the intent of this data review is primarily to demonstrate the capabilities of R markdown documentation, a more appropriate approach will be proposed (but not demonstrated) for sake of completeness. The spread of a disease is something that starts off very slow and with a small proportion of the population, but at some point in time it begins to rapidly climax, and eventually it will slow down due to (mostly) population saturation. Since it is well known that s-shaped curves is a family of curves associated to growth processes in finite spaces, proposing a model that produces a sigmoid shape would be a much better handling than simple linear equation. In the context of R language, using the 'glm' or 'nls' functions to fit the COVID-19 to "Richard's curve", or a generalized logistic function, would be a better approach. Since those curves are smooth and generally stop after their first plateau, the cumulative case counts presented would need several of those curves summed in different phases time in order to properly account for all of the individual contributory processes that accounts for all of the covid cases in the respective counties. 
 
-More often, since there's auto-correlation, or dependency, between the data  points in cumulative sums (each successive point on the x axis depends on the point behind it), looking at the total case counts violates alot of what's really sought after in regression modeling. (For example, residuals will not be gaussian-distributed.) That being said, time series modeling techniques exist to address auto-correlative data in time. Yet, another approach would be to consider the daily case counts. Figuring out which factors go into generating a number of cases per day might provide better results. 
+More often, since there's auto-correlation, or dependency, between the data  points in cumulative sums (each successive point on the x axis depends on the point behind it), looking at the total case counts violates alot of what's really sought after in regression modeling. (For example, residuals will not be gaussian-distributed.) That being said, time series modeling techniques exist to address auto-correlative data in time. Yet, another approach would be to consider the daily case counts. Figuring out which factors go into generating a number of cases per day might provide better results. In any event, these techniques go far beyond the scope of this assignment and course, so they remain as discussion points only. 
+
+# Conclusion 
+
+There exists an unbelievably complicated relationship between the total population, local weather and climate, and local policies that affected the spread of the COVID19 pandemic. Daily case counts provide the best representation of the seasonality component in the spread of the disease. The total case counts over time are a more complicated problem; however, the fact that there were more cases on the onset of the pandemic for Faulkner County, AR would most likely be due to two key factors: Arkansas has always had less stringent pandemic guidelines compared to New York (based on their state's websites), and the considerably hotter temperatures in Arkansas during the summer months that would most likely account for the increases during the summer months over the last three years. These two conditions alone, despite the two counties being very similar, provides the stark differences in case counts. 
+
+
 
