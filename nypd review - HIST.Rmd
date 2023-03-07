@@ -1,0 +1,264 @@
+---
+title: "NYPD - Shootings Data Review - Historical Data"
+author: "Micheal Wilson"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document, pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+
+
+library(lubridate)
+library(ggplot2)
+library(tidyverse) 
+
+```
+# Libraries used 
+
+```{r libraries, eval=FALSE}
+library(lubridate)
+library(ggplot2)
+library(tidyverse) 
+``` 
+
+## Data notes and variable definitions:
+
+This information is available from "NYPD Shooting Incident Data" landing page\
+<https://data.cityofnewyork.us/Public-Safety/NYPD-Shooting-Incident-Data-Historic-/833y-fsy8> \
+Accessed 28 FEB 2022,
+
+Some key items of note are primarily located in the "Data Footnotes" document located on that page. With that in mind, while it's possible to interpolate or identify some patterns from the data on a micro-level (below Borough level); however, considering the information in the footnotes, no geo-spatial data processing attempts will occur here in this analysis below the "Borough level." Geocoding of the data cannot be precise in most circumstances.
+
+Another key item is that duplicated entries exist. Each "INCIDENT_KEY" represents a victim, and duplicate keys are one incident.
+
+With this guidance in mind, the next section performs data loading.
+
+# Data ETL (Extract, Transform, Load)
+
+## Loading
+
+Loading data is fairly straightforward. This analysis will look at data up to 2022.  
+
+```{r hist_Data_ETL1}
+
+raw_data <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD", 
+                     na.strings ="(null)", stringsAsFactors = TRUE)
+```
+
+## Extraction and Tidying (Transforming)
+
+Defining the interest subset in the data:
+
+The common theme in all of the variables being discarded here is that they are largely a spatial component of the data. Precinct can refer to a specific station or a geographic area, and so it is discarded here. "JURISDICTION_CODE" is dropped since it also refers to what is arguably a geospatial component of the data that is below the "Borough level." Namely, since it refers to where the perpetrator was at the time of the crime, it is also discarded.
+
+Since it is given that shootings can have more than one victim, it may be of importance to assign a value to each unique key indicating the number of duplicates it may have. This will provide a "weight" or "magnitude" to each particular data point, and may be more meaningful in analysis in the future. Another way to view this situation is that it actually provides a victim count associated with each incident. After all, it'd be wise to have the choice to take into account only unique incidents, rather than incurring additional unintentional bias in models due to duplicates compounding with counts.
+
+```{r data_tidy}
+
+#colnames(df1)
+not.interested.in <- c("PRECINCT","JURISDICTION_CODE","X_COORD_CD",
+                       "Y_COORD_CD","Latitude","Longitude","Lon_Lat")
+
+
+subset.1.raw <- select(raw_data ,!any_of(not.interested.in)) 
+#Remember, vector's job is to identify the columns only, 
+#not do the discarding itself, and hence the somewhat grammatical double negative here. 
+rm(not.interested.in)
+
+# set up a temp object to append the counts to
+temp <- subset.1.raw %>% 
+  group_by(subset.1.raw$INCIDENT_KEY) %>%
+  add_count(name = "freq")
+
+#isolate only the frequencies
+temp <- temp[,"freq"]
+
+#merge it back to the working dataset
+subset.1.raw <- cbind(subset.1.raw,temp)
+#remove temp object
+rm(temp)
+# define another temp object for unique keys. keeping the first occurrence. 
+temp <- subset.1.raw[!duplicated(subset.1.raw$INCIDENT_KEY),]
+subset.1.uniques <- temp
+rm(temp)
+# This is actually the data set we'll use going forward, 
+
+#repeat for an additional frame for multiple-victims
+#Technically anything over 3 people is arguably a mass shooting,
+temp <- subset.1.raw[duplicated(subset.1.raw$INCIDENT_KEY),]
+subset.1.dupkeys <- temp
+rm(temp)
+
+#set primary working dataframe name. This flows through the rest of the document
+df <- subset.1.uniques
+```
+
+```{r data_transform_datetime}
+
+tformat <- "%H:%M:%S" # establishing time format of the data for reading by R
+ttemp <- as.character(df$OCCUR_TIME) # coercing to string
+thms <- strptime(ttemp, tformat) # converting to time object/data
+#setting a vector of zeros for setting the reference hour position of midnight. 
+#This would also be a line to modify for timezones or shifting the times. 
+ztime <- rep(as.POSIXct(strptime(as.character("00:00:00"),tformat)),
+             length(df$OCCUR_TIME)) 
+
+#mapping time values to numeric datatype in the reals. 
+hourval <- as.numeric(difftime(thms,ztime,units = "hours")) 
+#print(hourval)
+#hist(hourval)
+
+#adding it to the raw data, as it is merely a data transformation of raw
+df <- cbind(df,hourval) 
+
+#using lubridate to read the occurence date's non-readable format, 
+# transforming data into POSIXlt type for R
+dtempf <- as.data.frame(mdy(df$OCCUR_DATE))
+
+# merge back into raw data, and cleanup
+df$OCCUR_DATE <- dtempf
+colnames(df[,2]) <- "OCCUR_DATE" 
+rm(list=c("dtempf","tformat","ttemp","thms","ztime"))
+
+#doing a temporal layout of the victims as a function of month
+tseries <- df %>% 
+  mutate(MONTH = month(OCCUR_DATE), YEAR = year(OCCUR_DATE)) %>%
+  group_by(YEAR, MONTH) %>%
+  summarise(total = sum(freq))
+
+as.data.frame(tseries)
+t <- seq(1,nrow(tseries),1)
+tseries <- as.data.frame(cbind(t,tseries))
+colnames(tseries)[1] <- "t" 
+
+tdate <- as.Date(paste(tseries$YEAR, tseries$MONTH, "01", sep = "-"))
+tseries <- cbind(tdate, tseries)
+
+```
+
+# Analysis
+## Objective 
+
+The primary objectives of the analyses below are largely superficial and general in nature. The objective is to demonstrate rudimentary analyses given the functions of R, and explore the various factors that generate a shooting incident. 
+
+## Temporal
+
+The next plots show the distributions of the incidents as functions of time. These are just summaries of the temporal component of the data. To begin, a histogram of the victims of incidents, by the hour.  
+```{r tseriesplot1}
+hist(hourval, xlab = "Hour (in 24hr time)", breaks = seq(0,24,1), ylab = "Count", main = "Shooting victims by hour historically")
+```
+This next plot identifies the count of incidents by month. 
+```{r tseriesplot2}
+plot(tseries$tdate, tseries$total, xlab = "Month", ylab = "Count", main = "Shooting victims by Month")
+
+#functtest <- (250*(abs(sin(tseries$t/3+pi/1.5)))+min(tseries$total))
+#lines(tseries$t,functtest)
+```
+
+# Quick Analysis: 
+
+It's unsurprising that the data is non-uniformly distributed. Circadian rhythms would be the most likely cause for why shooting incident rates sharply decline after midnight. A less explainable artifact is the shooting incidents stark decrease in the winter and fall months, while the summer months have a sharp incline. If this were a truly random phenomena, then it's expected that there should be a more uniform rate of occurrence over time; however, there is seasonality in play for this time series. While the cause of this is unclear here, it's most likely due to people not wanting to be outside in the cold, rain, and snow. It also is a well known fact that warmer weather predisposes hostile crime, so that appears to be reflected in the data here. 
+
+
+
+
+```{r statsum_counts, echo=FALSE, include = FALSE}
+
+# There's a better way to perform this type of analysis using lapply, but couldn't figure it out. 
+# chunk suppressed due to largely being exploratory 
+
+table(df[,4]) # By borough
+table(df[,5]) # loc type
+
+table(df[,6]) # murder triggered
+table(df[,7]) # perp age group
+
+table(df[,8]) # perp sex
+table(df[,c(6,8)])
+table(df[,c(7,8)])
+
+table(df[,c(9)]) #Incidents by perp age group
+table(df[,c(10)]) #Incidents by perp Gender
+table(df[,c(11)]) #incidents by perp race
+
+table(df[,c(12)]) #victims by age group
+table(df[,c(13)]) #victim genders
+table(df[,c(14)]) #victim race
+
+# comparing groups of perps to victims to see if there's targeting between groups. 
+table(df[,c(12,9)])
+table(df[,c(13,10)])
+table(df[,c(14,11)])
+```
+
+
+# Summary Statistics
+## Counts
+```{r sum_Stats}
+# comparing groups of perps to victims to see if there's targeting between groups. 
+table(df[,c(12,9)])
+
+```
+
+
+
+```{r sum_Stats2}
+# comparing groups of perps to victims to see if there's targeting between groups. 
+#doing mild data cleanup 
+df <- df[!df$PERP_AGE_GROUP == "1020",]
+df <- df[!df$PERP_AGE_GROUP == "224",]
+df <- df[!df$PERP_AGE_GROUP == "940",]
+# cleanup complete 
+table2 <- as.data.frame(table(df[,c(10,7)]))
+table2
+
+ggplot(data = df) +
+  geom_bar(
+    mapping = aes(x = PERP_AGE_GROUP, fill = VIC_AGE_GROUP),
+    position = "fill"
+  ) +
+    labs(x = "Perpetrator Age Group", y = "Proportions of Victims Ages")
+```
+These numbers do indicate a simple subset of the population demographics of the boroughs by age. It's rare to find a 65yr old (or more) perpetrator, quite simply because out of the population as a whole, they aren't as common as the other age groups. Additionally, there is a stark difference between the perpetrator groups of ages 18-24 and 25-44 for their targets' age groups. Namely, the perpetrators aged 25-44 do not target the same proportions of victims as the younger perpetrator age groups--there is a notable increase in the victims being in the same 25-44yrs age group. This is of stark difference to the other age groups which more uniformly seem to be choosing victims around their own ages. This is also a topic worth exploring much further into, but it does seem a likely hypothesis to state that the victims' ages are proportional to the perpetrators. 
+
+
+
+```{r sum_Stats3}
+# comparing groups of perps to victims to see if there's targeting between groups. 
+table(df[,c(11,8)])
+
+ggplot(data = df) +
+  geom_bar(
+    mapping = aes(x = PERP_SEX, fill = VIC_SEX),
+    position = "fill"
+  ) +
+    labs(x = "Perpetrator Sex", y = "Proportions of Victims Sexes")
+```
+
+This table quickly shows that the majority of the perpetrators and victims involved in the incidents are Black. It is unclear if this is an artifact of the sampling from the population distribution of the boroughs of New York, or if this really does highlight to the culturally significant issues of racial and gang violence present in the boroughs. 
+
+## Basic Modeling
+
+We'll look at a basic modeling technique: Multiple Linear regression. This approach begins with the presupposition that there should be a discernable pattern in the data which provides indicators for a shooting incident's victim count. It's important to note that correlation does not imply causality with this approach, since the following model will be unweighted, untrained, or unpruned.
+
+```{r basic_model}
+#generating a temporary dataframe for modeling
+tempdf <- df[,c(4,5,7,8,9,13)] #dropping temporal and data key information
+model1 <- lm(freq ~ ., data = tempdf)
+summary(model1)
+```
+# Bias and Overall Analysis
+
+This model focuses on linearly fitting the victim generation (column named "freq") with the given perpetrator factors or generalized location descriptors. Since this model is effectively asserting what are the contributors to generating a victim count, a quick glance at the p-values provides some interesting investigation points for diving further. This comes with a caveat, however. Since the location descriptors are nested variables, they could be clouding the ability to determine any other significant predictors about the perpetrators. That being said, "Location desc - Bar/Nightclub" and "Private Dwelling" and "Apartment Buildings" having a significant p-value is unsurprising from a statistical perspective, considering that it accounts for so many of the locations where shootings occur. From a law enforcement, or more pragmatic perspective, this really means that victims are most often found in their dwellings and where there's an association with alcohol. While the data here has nothing to connect this correlation to other facts, it does provide the groundwork for asking more intense questions. Streets and parking lots also have the next most significant contributions to victim counts. Interestingly, these areas are much different than houses, the former being open while the latter is enclosed. From a statistical standpoint, it's likely that parking lots and streets strongly contribute to the model due to the lack of no other nested variable beneath those location classifications (unlike dwellings.) This practically means that they're statistically more weighted in the model. On the other hand, from the pragmatic perspective, given that it's easy to show this is where the most shootings do occur, it speaks to the environment as being a major contributory factor involved in a shooting incident. It is possible to infer that the perpetrators favor locations which provide them the highest perceived likelihood of getting away with the crime: Either they can do it in privacy in a dwelling, or they can do it and get away out in the open. 
+
+Specific location descriptions seem to contribute significantly to the model most likely due to the mass shootings (more victims per incident) at those locations. A quick review of the data which shows the incidents with the highest victim counts (noted by the "freq" column) as these locations. This is likely an artifact of the weighting applied to incidents which give victim counts. From a statistical perspective, since the data has not been scrubbed for outliers in that regard, it's worth revisiting a condensation of the data and taking this approach again. Since the model's data has an abundance of spatial factors or descriptions, it's easy to skew the model's performance in that direction, so to speak. Essentially, "where" the event took place has more weight in the model than the information about the perpetrators itself. This is a weakness of linear modeling, though. From a more mathematically general perspective, linear modelling merely attempts to describe the functional relationship of the mapping from the domain (factors) to the co-domain (victim counts) and nothing more. In short, the lack of further data scrubbing combined with this approach actually reveals no specific indicators for a perpetrators in terms of their race, sex, or age; however, from a practical point of view, it's arguable that this speaks more to the motives of the perpetrators rather than generic information about them. It additionally allows law enforcement to prioritizing certain types of locations while on patrols. Either way, perpetrators seem to favor a particular type of environment based on these results and approach.
+
+A better approach would be to use tree regressions or "nearest neighbors" approach to modeling to compensate for the lack of data-pruning or treatment, as well as the nested variables, for this type of data set. From the broader, data science perspective, all of these different modeling approaches could be tested to see if there's consistency in showing a predictive relationship between victim counts per incident and any of the given factors solely. It will be of importance though, to not select a model which favors one interpretation over the other given the non-uniformity in the dataset as it is most likely the truth is some intermediate solution between the various modeling methods.
+
+Considering the seasonality present and the majority of statistically significant variables being spatial, it's a fair assertion that shootings happen when the time and place is right. For this data set, it didn't seem to matter what the perpetrator's general demographic information was. This is a surprising result, as demographic factors are sometimes touted as the basis for a conclusion about an alleged perpetrator, but perhaps, it's just not the demographics information available in this data set. 
+
+
